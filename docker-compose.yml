@@ -1,104 +1,107 @@
 services:
   web:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8001:8001"
+    environment:
+      DEBUG: "0"
+      SECRET_KEY: ${SECRET_KEY}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS}
+      DATABASE_URL: postgres://horilla_user:horilla_pass@db:5432/horilla_db
+      DB_INIT_PASSWORD: ${DB_INIT_PASSWORD}
+      REDIS_URL: redis://:horilla_pass@redis:6379/0
+      CELERY_BROKER_URL: redis://:horilla_pass@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:horilla_pass@redis:6379/0
     volumes:
-      - .:/app
       - staticfiles:/app/staticfiles
       - media:/app/media
-    environment:
-      - DEBUG=1
-      - SECRET_KEY=dev-secret-key-change-in-production
-      - ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0
-      - CSRF_TRUSTED_ORIGINS=http://localhost:8001
-      - DATABASE_URL=postgres://horilla_user:horilla_pass@db:5435/horilla_db
-      - DB_INIT_PASSWORD=dev-init-password-change-in-production
-      - REDIS_URL=redis://:horilla_pass@redis:6380/0
-      - CELERY_BROKER_URL=redis://:horilla_pass@redis:6380/0
-      - CELERY_RESULT_BACKEND=redis://:horilla_pass@redis:6380/0
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8001/health/ || exit 1"]
       interval: 30s
-      timeout: 30s
+      timeout: 10s
+      retries: 5
       start_period: 60s
-      retries: 3
 
   celery-worker:
-    build: .
-    entrypoint: []
+    build:
+      context: .
+      dockerfile: Dockerfile
     command: celery -A horilla worker --loglevel=info --concurrency=2
-    healthcheck:
-      disable: true
-    volumes:
-      - .:/app
-      - media:/app/media
     environment:
-      - DATABASE_URL=postgres://horilla_user:horilla_pass@db:5432/horilla_db
-      - REDIS_URL=redis://:horilla_pass@redis:6380/0
-      - CELERY_BROKER_URL=redis://:horilla_pass@redis:6380/0
-      - CELERY_RESULT_BACKEND=redis://:horilla_pass@redis:6380/0
+      DATABASE_URL: postgres://horilla_user:horilla_pass@db:5432/horilla_db
+      REDIS_URL: redis://:horilla_pass@redis:6379/0
+      CELERY_BROKER_URL: redis://:horilla_pass@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:horilla_pass@redis:6379/0
+    volumes:
+      - media:/app/media
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      disable: true
 
   celery-beat:
-    build: .
-    entrypoint: []
+    build:
+      context: .
+      dockerfile: Dockerfile
     command: celery -A horilla beat --loglevel=info
-    healthcheck:
-      disable: true
-    volumes:
-      - .:/app
     environment:
-      - DATABASE_URL=postgres://horilla_user:horilla_pass@db:5435/horilla_db
-      - REDIS_URL=redis://:horilla_pass@redis:6380/0
-      - CELERY_BROKER_URL=redis://:horilla_pass@redis:6380/0
-      - CELERY_RESULT_BACKEND=redis://:horilla_pass@redis:6380/0
+      DATABASE_URL: postgres://horilla_user:horilla_pass@db:5432/horilla_db
+      REDIS_URL: redis://:horilla_pass@redis:6379/0
+      CELERY_BROKER_URL: redis://:horilla_pass@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:horilla_pass@redis:6379/0
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      disable: true
 
   db:
     image: postgres:16-alpine
-    ports:
-      - "5435:5432"
     environment:
       POSTGRES_DB: horilla_db
       POSTGRES_USER: horilla_user
       POSTGRES_PASSWORD: horilla_pass
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U horilla_user -d horilla_db"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6380:6379"
     command: redis-server --appendonly yes --requirepass horilla_pass
     volumes:
       - redis_data:/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "horilla_pass", "ping"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   nginx:
     image: nginx:alpine
+    profiles:
+      - production
     ports:
       - "80:80"
     volumes:
@@ -108,7 +111,7 @@ services:
     depends_on:
       web:
         condition: service_healthy
-    profiles: ["production"]
+    restart: unless-stopped
 
 volumes:
   staticfiles:
